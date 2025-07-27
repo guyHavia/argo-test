@@ -15,6 +15,7 @@ spec:
       containers:
         - name: my-web-app
           image: guyhavia/my-web-app:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
       imagePullSecrets:
