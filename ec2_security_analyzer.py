@@ -1,3 +1,8 @@
+"""
+EC2 Security Group Security Analyzer
+Analyzes all EC2 instances in a specified region and flags suspicious security group rules.
+"""
+
 import boto3
 import json
 from datetime import datetime
@@ -5,7 +10,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from collections import defaultdict
 
 class EC2SecurityAnalyzer:
-    def __init__(self, region_name='il-central-1'):
+    def __init__(self, region_name='us-east-1'):
         """Initialize the analyzer with AWS region."""
         self.region_name = region_name
         try:
@@ -380,6 +385,8 @@ class EC2SecurityAnalyzer:
             
         except Exception as e:
             return True, {'error': str(e)}, [f'Error checking IMDS configuration: {str(e)}']
+       
+    def get_sg_name_by_id(self, sg_id, security_groups):
         """Get security group name by ID."""
         if sg_id in security_groups:
             return security_groups[sg_id]['group_name']
@@ -801,9 +808,9 @@ def main():
     print("=" * 50)
     
     # Get region from user
-    region = input("Enter AWS region (default: il-central-1): ").strip()
+    region = input("Enter AWS region (default: us-east-1): ").strip()
     if not region:
-        region = 'il-central-1'
+        region = 'us-east-1'
     
     print(f"\n🌍 Starting analysis in region: {region}")
     print("⚠️  Note: This tool requires the following AWS permissions:")
