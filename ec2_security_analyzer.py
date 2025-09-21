@@ -220,8 +220,22 @@ class EC2SecurityAnalyzer:
             print(f"❌ Unexpected error: {e}")
             raise
 
+    def get_sg_name_by_id(self, sg_id, security_groups):
+        """Get security group name by ID."""
+        if sg_id in security_groups:
+            return security_groups[sg_id]['group_name']
+        return 'Unknown SG'
+
+    def format_source_with_names(self, source, security_groups):
+        """Format source with security group names where applicable."""
+        if source.startswith('sg:'):
+            sg_id = source.replace('sg:', '').split(' ')[0]
+            sg_name = self.get_sg_name_by_id(sg_id, security_groups)
+            return f"{source} [{sg_name}]"
+        return source
+
     def print_results(self, results):
-        """Print results to console in a nice format."""
+        """Print results to console in a nice format organized by EC2 instance."""
         print("\n" + "="*80)
         print(f"🔒 EC2 SECURITY GROUP ANALYSIS - {results['region'].upper()}")
         print("="*80)
@@ -237,47 +251,86 @@ class EC2SecurityAnalyzer:
         print(f"⚠️  Suspicious Rules Found: {total_suspicious}")
         print("\n")
         
-        # Print instance summary
-        print("📋 EC2 INSTANCES SUMMARY")
-        print("-" * 50)
-        for instance_id, info in results['instances'].items():
-            status_emoji = "🟢" if info['state'] == 'running' else "🔴" if info['state'] == 'stopped' else "🟡"
-            print(f"{status_emoji} {instance_id} ({info['name']}) - {info['instance_type']} - {info['state']}")
-            print(f"   Security Groups: {', '.join(info['security_groups'])}")
+        # Print detailed analysis by EC2 instance
+        print("📋 DETAILED EC2 SECURITY ANALYSIS")
+        print("="*80)
         
-        print("\n")
-        
-        # Print security group details
-        for sg_id, sg_info in results['security_groups'].items():
-            print(f"🛡️  SECURITY GROUP: {sg_info['group_name']} ({sg_id})")
-            print(f"   Description: {sg_info['description']}")
-            print(f"   VPC: {sg_info['vpc_id']}")
-            print(f"   Total Rules: {sg_info['total_rules']}")
+        for instance_id, instance_info in results['instances'].items():
+            status_emoji = "🟢" if instance_info['state'] == 'running' else "🔴" if instance_info['state'] == 'stopped' else "🟡"
+            print(f"\n{status_emoji} EC2 {instance_id} [{instance_info['name']}]:")
+            print(f"    Instance Type: {instance_info['instance_type']} | State: {instance_info['state']}")
             
-            if sg_info['suspicious_rules']:
-                print(f"   ⚠️  SUSPICIOUS RULES: {len(sg_info['suspicious_rules'])}")
-                for susp_rule in sg_info['suspicious_rules']:
-                    rule = susp_rule['rule']
-                    print(f"      🚨 {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}")
-                    print(f"         Sources: {', '.join(rule['sources'])}")
-                    for reason in susp_rule['reasons']:
-                        print(f"         ❌ {reason}")
+            # Analyze each security group attached to this instance
+            open_ports_summary = []
             
-            # Print all inbound rules
-            if sg_info['inbound_rules']:
-                print(f"   📥 INBOUND RULES ({len(sg_info['inbound_rules'])}):")
-                for rule in sg_info['inbound_rules']:
-                    suspicious_marker = "🚨" if any(r['rule'] == rule for r in sg_info['suspicious_rules']) else "✅"
-                    print(f"      {suspicious_marker} {rule['protocol']} port {rule['port_range']} from {', '.join(rule['sources'])}")
+            for sg_id in instance_info['security_groups']:
+                if sg_id in results['security_groups']:
+                    sg_info = results['security_groups'][sg_id]
+                    print(f"\n    🛡️  Security Group {sg_id} [{sg_info['group_name']}]:")
+                    print(f"        Description: {sg_info['description']}")
+                    
+                    # Inbound rules
+                    if sg_info['inbound_rules']:
+                        print(f"        📥 Inbound Rules ({len(sg_info['inbound_rules'])}):")
+                        for rule in sg_info['inbound_rules']:
+                            suspicious_marker = "🚨" if any(r['rule'] == rule and r['direction'] == 'inbound' for r in sg_info['suspicious_rules']) else "✅"
+                            
+                            # Format sources with SG names
+                            formatted_sources = []
+                            for source in rule['sources']:
+                                formatted_source = self.format_source_with_names(source, results['security_groups'])
+                                formatted_sources.append(formatted_source)
+                            
+                            rule_desc = f"{rule['protocol']} port {rule['port_range']} from {', '.join(formatted_sources)}"
+                            print(f"            {suspicious_marker} {rule_desc}")
+                            
+                            # Add to open ports summary
+                            for source in formatted_sources:
+                                port_info = f"Port {rule['port_range']} ({rule['protocol']}) from {source}"
+                                if suspicious_marker == "🚨":
+                                    port_info += " ⚠️ SUSPICIOUS"
+                                open_ports_summary.append(port_info)
+                    
+                    # Outbound rules
+                    if sg_info['outbound_rules']:
+                        print(f"        📤 Outbound Rules ({len(sg_info['outbound_rules'])}):")
+                        for rule in sg_info['outbound_rules']:
+                            suspicious_marker = "🚨" if any(r['rule'] == rule and r['direction'] == 'outbound' for r in sg_info['suspicious_rules']) else "✅"
+                            
+                            # Format destinations with SG names
+                            formatted_destinations = []
+                            for dest in rule['sources']:  # Note: 'sources' contains destinations for outbound rules
+                                formatted_dest = self.format_source_with_names(dest, results['security_groups'])
+                                formatted_destinations.append(formatted_dest)
+                            
+                            rule_desc = f"{rule['protocol']} port {rule['port_range']} to {', '.join(formatted_destinations)}"
+                            print(f"            {suspicious_marker} {rule_desc}")
+                    
+                    # Show suspicious rules for this SG
+                    if sg_info['suspicious_rules']:
+                        print(f"        ⚠️  SUSPICIOUS RULES IN THIS SG:")
+                        for susp_rule in sg_info['suspicious_rules']:
+                            rule = susp_rule['rule']
+                            formatted_sources = []
+                            for source in rule['sources']:
+                                formatted_source = self.format_source_with_names(source, results['security_groups'])
+                                formatted_sources.append(formatted_source)
+                            
+                            print(f"            🚨 {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}")
+                            print(f"               Sources/Destinations: {', '.join(formatted_sources)}")
+                            for reason in susp_rule['reasons']:
+                                print(f"               ❌ {reason}")
             
-            # Print all outbound rules
-            if sg_info['outbound_rules']:
-                print(f"   📤 OUTBOUND RULES ({len(sg_info['outbound_rules'])}):")
-                for rule in sg_info['outbound_rules']:
-                    suspicious_marker = "🚨" if any(r['rule'] == rule for r in sg_info['suspicious_rules']) else "✅"
-                    print(f"      {suspicious_marker} {rule['protocol']} port {rule['port_range']} to {', '.join(rule['sources'])}")
+            # Summary for this EC2 instance
+            print(f"\n    📊 SUMMARY for EC2 {instance_id} [{instance_info['name']}]:")
+            if open_ports_summary:
+                print(f"        This instance has the following open ports:")
+                for i, port_info in enumerate(open_ports_summary, 1):
+                    print(f"        {i}. {port_info}")
+            else:
+                print(f"        ✅ No inbound rules found (or no security groups attached)")
             
-            print("\n" + "-" * 50 + "\n")
+            print("\n" + "-" * 80)
 
     def save_results(self, results, filename=None):
         """Save results to a file."""
@@ -290,51 +343,124 @@ class EC2SecurityAnalyzer:
                 json.dump(results, f, indent=2, default=str)
             print(f"💾 Results saved to: {filename}")
             
-            # Also create a readable text report
+            # Also create a readable text report with the new format
             text_filename = filename.replace('.json', '_report.txt')
             with open(text_filename, 'w') as f:
                 f.write(f"EC2 Security Group Analysis Report - {results['region'].upper()}\n")
-                f.write("=" * 60 + "\n")
+                f.write("=" * 80 + "\n")
                 f.write(f"Scan Time: {results['scan_time']}\n")
                 f.write(f"Total Instances: {len(results['instances'])}\n")
-                f.write(f"Total Security Groups: {len(results['security_groups'])}\n\n")
+                f.write(f"Total Security Groups: {len(results['security_groups'])}\n")
                 
-                # Summary of suspicious rules
+                # Count suspicious rules
                 total_suspicious = sum(len(sg['suspicious_rules']) for sg in results['security_groups'].values())
-                f.write(f"SUSPICIOUS RULES SUMMARY: {total_suspicious} total\n")
-                f.write("-" * 40 + "\n")
+                f.write(f"Suspicious Rules Found: {total_suspicious}\n\n")
                 
+                # Detailed analysis by EC2 instance
+                f.write("DETAILED EC2 SECURITY ANALYSIS\n")
+                f.write("=" * 80 + "\n")
+                
+                for instance_id, instance_info in results['instances'].items():
+                    status_indicator = "[RUNNING]" if instance_info['state'] == 'running' else "[STOPPED]" if instance_info['state'] == 'stopped' else f"[{instance_info['state'].upper()}]"
+                    f.write(f"\nEC2 {instance_id} [{instance_info['name']}] {status_indicator}:\n")
+                    f.write(f"    Instance Type: {instance_info['instance_type']} | State: {instance_info['state']}\n")
+                    
+                    # Analyze each security group attached to this instance
+                    open_ports_summary = []
+                    
+                    for sg_id in instance_info['security_groups']:
+                        if sg_id in results['security_groups']:
+                            sg_info = results['security_groups'][sg_id]
+                            f.write(f"\n    Security Group {sg_id} [{sg_info['group_name']}]:\n")
+                            f.write(f"        Description: {sg_info['description']}\n")
+                            
+                            # Inbound rules
+                            if sg_info['inbound_rules']:
+                                f.write(f"        Inbound Rules ({len(sg_info['inbound_rules'])}):\n")
+                                for rule in sg_info['inbound_rules']:
+                                    suspicious_marker = "[SUSPICIOUS]" if any(r['rule'] == rule and r['direction'] == 'inbound' for r in sg_info['suspicious_rules']) else "[OK]"
+                                    
+                                    # Format sources with SG names
+                                    formatted_sources = []
+                                    for source in rule['sources']:
+                                        formatted_source = self.format_source_with_names(source, results['security_groups'])
+                                        formatted_sources.append(formatted_source)
+                                    
+                                    rule_desc = f"{rule['protocol']} port {rule['port_range']} from {', '.join(formatted_sources)}"
+                                    f.write(f"            {suspicious_marker} {rule_desc}\n")
+                                    
+                                    # Add to open ports summary
+                                    for source in formatted_sources:
+                                        port_info = f"Port {rule['port_range']} ({rule['protocol']}) from {source}"
+                                        if suspicious_marker == "[SUSPICIOUS]":
+                                            port_info += " [SUSPICIOUS]"
+                                        open_ports_summary.append(port_info)
+                            
+                            # Outbound rules
+                            if sg_info['outbound_rules']:
+                                f.write(f"        Outbound Rules ({len(sg_info['outbound_rules'])}):\n")
+                                for rule in sg_info['outbound_rules']:
+                                    suspicious_marker = "[SUSPICIOUS]" if any(r['rule'] == rule and r['direction'] == 'outbound' for r in sg_info['suspicious_rules']) else "[OK]"
+                                    
+                                    # Format destinations with SG names
+                                    formatted_destinations = []
+                                    for dest in rule['sources']:  # Note: 'sources' contains destinations for outbound rules
+                                        formatted_dest = self.format_source_with_names(dest, results['security_groups'])
+                                        formatted_destinations.append(formatted_dest)
+                                    
+                                    rule_desc = f"{rule['protocol']} port {rule['port_range']} to {', '.join(formatted_destinations)}"
+                                    f.write(f"            {suspicious_marker} {rule_desc}\n")
+                            
+                            # Show suspicious rules for this SG
+                            if sg_info['suspicious_rules']:
+                                f.write(f"        SUSPICIOUS RULES IN THIS SG:\n")
+                                for susp_rule in sg_info['suspicious_rules']:
+                                    rule = susp_rule['rule']
+                                    formatted_sources = []
+                                    for source in rule['sources']:
+                                        formatted_source = self.format_source_with_names(source, results['security_groups'])
+                                        formatted_sources.append(formatted_source)
+                                    
+                                    f.write(f"            [ALERT] {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}\n")
+                                    f.write(f"                   Sources/Destinations: {', '.join(formatted_sources)}\n")
+                                    for reason in susp_rule['reasons']:
+                                        f.write(f"                   WARNING: {reason}\n")
+                    
+                    # Summary for this EC2 instance
+                    f.write(f"\n    SUMMARY for EC2 {instance_id} [{instance_info['name']}]:\n")
+                    if open_ports_summary:
+                        f.write(f"        This instance has the following open ports:\n")
+                        for i, port_info in enumerate(open_ports_summary, 1):
+                            f.write(f"        {i}. {port_info}\n")
+                    else:
+                        f.write(f"        No inbound rules found (or no security groups attached)\n")
+                    
+                    f.write("\n" + "-" * 80 + "\n")
+                
+                # Global suspicious rules summary at the end
+                f.write(f"\nGLOBAL SUSPICIOUS RULES SUMMARY\n")
+                f.write("=" * 40 + "\n")
+                
+                suspicious_count = 0
                 for sg_id, sg_info in results['security_groups'].items():
                     if sg_info['suspicious_rules']:
                         f.write(f"\nSecurity Group: {sg_info['group_name']} ({sg_id})\n")
                         for susp_rule in sg_info['suspicious_rules']:
+                            suspicious_count += 1
                             rule = susp_rule['rule']
-                            f.write(f"  - {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}\n")
-                            f.write(f"    Sources: {', '.join(rule['sources'])}\n")
+                            formatted_sources = []
+                            for source in rule['sources']:
+                                formatted_source = self.format_source_with_names(source, results['security_groups'])
+                                formatted_sources.append(formatted_source)
+                            
+                            f.write(f"  {suspicious_count}. {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}\n")
+                            f.write(f"     Sources/Destinations: {', '.join(formatted_sources)}\n")
                             for reason in susp_rule['reasons']:
-                                f.write(f"    WARNING: {reason}\n")
+                                f.write(f"     WARNING: {reason}\n")
+                            f.write("\n")
                 
-                # Detailed security group information
-                f.write(f"\n\nDETAILED SECURITY GROUP ANALYSIS\n")
-                f.write("=" * 40 + "\n")
-                
-                for sg_id, sg_info in results['security_groups'].items():
-                    f.write(f"\nSecurity Group: {sg_info['group_name']} ({sg_id})\n")
-                    f.write(f"Description: {sg_info['description']}\n")
-                    f.write(f"VPC: {sg_info['vpc_id']}\n")
-                    f.write(f"Total Rules: {sg_info['total_rules']}\n")
-                    
-                    if sg_info['inbound_rules']:
-                        f.write(f"\nInbound Rules ({len(sg_info['inbound_rules'])}):\n")
-                        for rule in sg_info['inbound_rules']:
-                            f.write(f"  - {rule['protocol']} port {rule['port_range']} from {', '.join(rule['sources'])}\n")
-                    
-                    if sg_info['outbound_rules']:
-                        f.write(f"\nOutbound Rules ({len(sg_info['outbound_rules'])}):\n")
-                        for rule in sg_info['outbound_rules']:
-                            f.write(f"  - {rule['protocol']} port {rule['port_range']} to {', '.join(rule['sources'])}\n")
-                    
-                    f.write("\n" + "-" * 50 + "\n")
+                if suspicious_count == 0:
+                    f.write("No suspicious rules found! Your security groups look good.\n")
             
             print(f"📄 Text report saved to: {text_filename}")
             
