@@ -593,14 +593,14 @@ class EC2SecurityAnalyzer:
                 f.write(f"Total Instances: {len(results['instances'])}\n")
                 f.write(f"Total Security Groups: {len(results['security_groups'])}\n")
                 
-                # Count suspicious items
-                total_suspicious = sum(len(sg['suspicious_rules']) for sg in results['security_groups'].values())
-                total_iam_suspicious = sum(1 for instance in results['instances'].values() if instance['instance_profile']['is_suspicious'])
-                total_imds_suspicious = sum(1 for instance in results['instances'].values() if instance['imds']['is_suspicious'])
+                # Count suspicious items - FIX: Calculate these values here
+                sg_suspicious_count = sum(len(sg['suspicious_rules']) for sg in results['security_groups'].values())
+                iam_issue_count = sum(1 for instance in results['instances'].values() if instance['instance_profile']['is_suspicious'])
+                imds_issue_count = sum(1 for instance in results['instances'].values() if instance['imds']['is_suspicious'])
                 
-                f.write(f"Security Group Suspicious Rules: {total_suspicious}\n")
-                f.write(f"IAM Instance Profile Issues: {total_iam_suspicious}\n")
-                f.write(f"IMDS Configuration Issues: {total_imds_suspicious}\n\n")
+                f.write(f"Security Group Suspicious Rules: {sg_suspicious_count}\n")
+                f.write(f"IAM Instance Profile Issues: {iam_issue_count}\n")
+                f.write(f"IMDS Configuration Issues: {imds_issue_count}\n\n")
                 
                 # Detailed analysis by EC2 instance
                 f.write("DETAILED EC2 SECURITY ANALYSIS\n")
@@ -747,8 +747,63 @@ class EC2SecurityAnalyzer:
                     
                     f.write("\n" + "-" * 80 + "\n")
                 
+                # Additional analysis sections
+                f.write(f"\n1. SECURITY GROUP ANALYSIS SUMMARY\n")
+                f.write("-" * 40 + "\n")
                 
-                if imds_issue_count == 0:
+                if sg_suspicious_count > 0:
+                    f.write(f"Found {sg_suspicious_count} suspicious security group rules:\n")
+                    
+                    # List all suspicious rules across all security groups
+                    rule_count = 1
+                    for sg_id, sg_info in results['security_groups'].items():
+                        if sg_info['suspicious_rules']:
+                            f.write(f"\nSecurity Group {sg_id} [{sg_info['group_name']}]:\n")
+                            for susp_rule in sg_info['suspicious_rules']:
+                                rule = susp_rule['rule']
+                                f.write(f"  {rule_count}. {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}\n")
+                                f.write(f"     Sources/Destinations: {', '.join(rule['sources'])}\n")
+                                for reason in susp_rule['reasons']:
+                                    f.write(f"     - {reason}\n")
+                                rule_count += 1
+                else:
+                    f.write("No suspicious security group rules found!\n")
+                
+                f.write(f"\n2. IAM INSTANCE PROFILE ANALYSIS SUMMARY\n")
+                f.write("-" * 40 + "\n")
+                
+                if iam_issue_count > 0:
+                    f.write(f"Found IAM security issues on {iam_issue_count} instances:\n")
+                    
+                    issue_count = 1
+                    for instance_id, instance_info in results['instances'].items():
+                        if instance_info['instance_profile']['is_suspicious']:
+                            f.write(f"\n{issue_count}. EC2 {instance_id} [{instance_info['name']}]:\n")
+                            if instance_info['instance_profile']['arn']:
+                                f.write(f"   Profile: {instance_info['instance_profile']['arn']}\n")
+                            else:
+                                f.write(f"   Profile: None attached\n")
+                            
+                            for reason in instance_info['instance_profile']['trust_policy_reasons']:
+                                f.write(f"   - {reason}\n")
+                            issue_count += 1
+                else:
+                    f.write("No IAM instance profile issues found!\n")
+                
+                f.write(f"\n3. IMDS CONFIGURATION ANALYSIS SUMMARY\n")
+                f.write("-" * 40 + "\n")
+                
+                if imds_issue_count > 0:
+                    f.write(f"Found IMDS configuration issues on {imds_issue_count} instances:\n")
+                    
+                    issue_count = 1
+                    for instance_id, instance_info in results['instances'].items():
+                        if instance_info['imds']['is_suspicious']:
+                            f.write(f"\n{issue_count}. EC2 {instance_id} [{instance_info['name']}]:\n")
+                            for reason in instance_info['imds']['reasons']:
+                                f.write(f"   - {reason}\n")
+                            issue_count += 1
+                else:
                     f.write("No IMDS configuration issues found!\n")
                 
                 # Overall security score
@@ -765,13 +820,13 @@ class EC2SecurityAnalyzer:
                 f.write(f"  - IMDS Configuration Issues: {imds_issue_count}\n\n")
                 
                 if total_issues == 0:
-                    f.write("🎉 EXCELLENT! No security issues found across all categories!\n")
+                    f.write("EXCELLENT! No security issues found across all categories!\n")
                 elif total_issues <= 3:
-                    f.write("⚠️  GOOD - Only minor security issues found. Review and address when possible.\n")
+                    f.write("GOOD - Only minor security issues found. Review and address when possible.\n")
                 elif total_issues <= 10:
-                    f.write("⚠️  MODERATE - Several security issues found. Recommended to address soon.\n")
+                    f.write("MODERATE - Several security issues found. Recommended to address soon.\n")
                 else:
-                    f.write("🚨 HIGH RISK - Many security issues found. Immediate attention recommended!\n")
+                    f.write("HIGH RISK - Many security issues found. Immediate attention recommended!\n")
                 
                 # Recommendations
                 f.write(f"\nRECOMMENDATIONS:\n")
