@@ -1,65 +1,3 @@
-# Global summary sections
-                f.write(f"\nGLOBAL SECURITY SUMMARY\n")
-                f.write("=" * 50 + "\n")
-                
-                # Security Group Issues
-                f.write(f"\n1. SECURITY GROUP SUSPICIOUS RULES\n")
-                f.write("-" * 40 + "\n")
-                
-                sg_suspicious_count = 0
-                for sg_id, sg_info in results['security_groups'].items():
-                    if sg_info['suspicious_rules']:
-                        f.write(f"\nSecurity Group: {sg_info['group_name']} ({sg_id})\n")
-                        for susp_rule in sg_info['suspicious_rules']:
-                            sg_suspicious_count += 1
-                            rule = susp_rule['rule']
-                            formatted_sources = []
-                            for source in rule['sources']:
-                                formatted_source = self.format_source_with_names(source, results['security_groups'])
-                                formatted_sources.append(formatted_source)
-                            
-                            f.write(f"  {sg_suspicious_count}. {susp_rule['direction'].upper()}: {rule['protocol']} port {rule['port_range']}\n")
-                            f.write(f"     Sources/Destinations: {', '.join(formatted_sources)}\n")
-                            for reason in susp_rule['reasons']:
-                                f.write(f"     WARNING: {reason}\n")
-                            f.write("\n")
-                
-                if sg_suspicious_count == 0:
-                    f.write("No suspicious security group rules found!\n")
-                
-                # IAM Issues
-                f.write(f"\n2. IAM INSTANCE PROFILE ISSUES\n")
-                f.write("-" * 40 + "\n")
-                
-                iam_issue_count = 0
-                for instance_id, instance_info in results['instances'].items():
-                    if instance_info['instance_profile']['is_suspicious']:
-                        iam_issue_count += 1
-                        f.write(f"\n{iam_issue_count}. EC2 {instance_id} [{instance_info['name']}]:\n")
-                        if instance_info['instance_profile']['arn']:
-                            f.write(f"   Instance Profile: {instance_info['instance_profile']['arn']}\n")
-                        for reason in instance_info['instance_profile']['trust_policy_reasons']:
-                            f.write(f"   WARNING: {reason}\n")
-                
-                if iam_issue_count == 0:
-                    f.write("No IAM instance profile issues found!\n")
-                
-                # IMDS Issues
-                f.write(f"\n3. IMDS CONFIGURATION ISSUES\n")
-                f.write("-" * 40 + "\n")
-                
-                imds_issue_count = 0
-                for instance_id, instance_info in results['instances'].items():
-                    if instance_info['imds']['is_suspicious']:
-                        imds_issue_count += 1
-                        f.write(f"\n{imds_issue_count}. EC2 {instance_id} [{instance_info['name']}]:\n")
-                        for reason in instance_info['imds']['reasons']:
-                            f.write(f"   WARNING: {reason}\n")#!/usr/bin/env python3
-"""
-EC2 Security Group Security Analyzer
-Analyzes all EC2 instances in a specified region and flags suspicious security group rules.
-"""
-
 import boto3
 import json
 from datetime import datetime
@@ -67,7 +5,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from collections import defaultdict
 
 class EC2SecurityAnalyzer:
-    def __init__(self, region_name='us-east-1'):
+    def __init__(self, region_name='il-central-1'):
         """Initialize the analyzer with AWS region."""
         self.region_name = region_name
         try:
@@ -863,9 +801,9 @@ def main():
     print("=" * 50)
     
     # Get region from user
-    region = input("Enter AWS region (default: us-east-1): ").strip()
+    region = input("Enter AWS region (default: il-central-1): ").strip()
     if not region:
-        region = 'us-east-1'
+        region = 'il-central-1'
     
     print(f"\n🌍 Starting analysis in region: {region}")
     print("⚠️  Note: This tool requires the following AWS permissions:")
